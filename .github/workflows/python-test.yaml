@@ -1,0 +1,96 @@
+name: CI / Python / Tests - Coverage
+
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        run: curl -LsSf https://astral.sh/uv/0.4.0/install.sh | sh
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Restore uv cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.uv-cache
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+            uv-${{ runner.os }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Test with pytest configured in pyproject.toml
+        env:
+          COVERAGE_FILE: .coverage.${{ matrix.python-version }}
+        run: |
+          uv run coverage run
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: covdata-${{ matrix.python-version }}
+          path: .coverage.*
+          if-no-files-found: warn
+          retention-days: 3 # ideally would delete, but possibility of needing
+          include-hidden-files: true
+
+  coverage:
+    runs-on: ubuntu-latest
+    name: Coverage report
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        # Install uv@0.4.0 version using the installer
+        run: curl -LsSf https://astral.sh/uv/0.4.0/install.sh | sh
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Restore uv cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.uv-cache
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+            uv-${{ runner.os }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Get other coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # creates a directory with the artifact unpacked inside
+          path: ./covdata
+
+      - name: Combine reports
+        # we don't want to fail if there are no reports to combine (only 1 report)
+        run: |
+          if [ ! -f .coverage ]; then touch .coverage; fi
+          uv run coverage combine -a covdata/**/ || mv covdata/.??* .
+          uv run coverage report -m --skip-covered --format=markdown >> $GITHUB_STEP_SUMMARY

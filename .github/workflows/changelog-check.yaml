@@ -1,0 +1,40 @@
+name: changelog
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - main
+
+env:
+  CACHE_VERSION: 1
+
+permissions:
+  contents: read
+
+jobs:
+  check-changelog:
+    if: |
+      ! github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'skip news :mute:')
+    name: Changelog Entry Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out code from GitHub
+        uses: actions/checkout@v4.1.2
+        with:
+          # Need to know the current status of `dev/next-conversion` branch to compare properly
+          fetch-depth: 0
+
+      - name: Check for changes in the .changes folder
+        id: changelog
+        run: |
+          if [[ -z $(git diff --name-only origin/main --relative .changes/) ]]; then
+            echo "No CHANGELOG changes detected."
+            exit 1
+          fi
